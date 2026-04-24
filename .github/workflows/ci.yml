@@ -1,0 +1,104 @@
+name: fakestore-qa CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  api-tests:
+    name: API Tests (behave)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run API tests
+        run: |
+          behave api_tests/features/ \
+            --format allure_behave.formatter:AllureFormatter \
+            --outfile allure-results/ \
+            --format pretty
+
+      - name: Upload Allure results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-api
+          path: allure-results/
+
+  ui-tests:
+    name: UI Tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: api-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
+
+      - name: Start storefront and wait for ready
+        run: docker compose up -d --build --wait
+
+      - name: Run UI tests
+        run: pytest ui_tests/tests/ --alluredir=allure-results/ -v
+
+      - name: Stop storefront
+        if: always()
+        run: docker compose down
+
+      - name: Upload Allure results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-ui
+          path: allure-results/
+
+  publish-report:
+    name: Publish Allure Report
+    runs-on: ubuntu-latest
+    needs: [api-tests, ui-tests]
+    if: always() && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all Allure results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: allure-results-*
+          merge-multiple: true
+          path: allure-results/
+
+      - name: Generate Allure report
+        uses: simple-elf/allure-report-action@v1.13
+        with:
+          allure_results: allure-results/
+          allure_report: allure-report/
+          gh_pages: gh-pages
+          allure_history: allure-history
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-report/
