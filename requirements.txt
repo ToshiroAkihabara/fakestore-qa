@@ -1,0 +1,6 @@
+behave==1.2.6
+requests==2.31.0
+allure-behave==2.15.3
+pytest==8.2.0
+pytest-playwright==0.5.0
+allure-pytest==2.15.3
