@@ -13,6 +13,10 @@ jobs:
   api-tests:
     name: API Tests (behave)
     runs-on: ubuntu-latest
+    env:
+      HTTP_PROXY: ${{ secrets.PROXY_URL }}
+      HTTPS_PROXY: ${{ secrets.PROXY_URL }}
+      NO_PROXY: localhost,127.0.0.1
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +27,11 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Check Fake Store API through proxy
+        run: |
+          test -n "$HTTPS_PROXY"
+          curl --fail --show-error https://fakestoreapi.com/products/1
 
       - name: Run API tests
         run: |
@@ -42,6 +51,12 @@ jobs:
     name: UI Tests (Playwright)
     runs-on: ubuntu-latest
     needs: api-tests
+    env:
+      HTTP_PROXY: ${{ secrets.PROXY_URL }}
+      HTTPS_PROXY: ${{ secrets.PROXY_URL }}
+      UI_BASE_URL: http://127.0.0.1:3000
+      VITE_API_BASE_URL: http://127.0.0.1:8000
+      NO_PROXY: localhost,127.0.0.1
     steps:
       - uses: actions/checkout@v4
 
@@ -56,8 +71,22 @@ jobs:
       - name: Install Playwright browsers
         run: playwright install --with-deps chromium
 
+      - name: Start Fake Store API proxy
+        run: |
+          python .github/scripts/fakestore_proxy.py &
+          for i in {1..15}; do
+            curl --fail --show-error http://127.0.0.1:8000/products/1 && exit 0
+            sleep 1
+          done
+          exit 1
+
       - name: Start storefront and wait for ready
         run: docker compose up -d --build --wait
+
+      - name: Check storefront page
+        run: |
+          curl --fail --show-error http://127.0.0.1:3000
+          docker compose logs storefront
 
       - name: Run UI tests
         run: pytest ui_tests/tests/ --alluredir=allure-results/ -v
